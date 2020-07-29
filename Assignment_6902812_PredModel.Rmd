@@ -1,0 +1,388 @@
+---
+title: "Prediction Model for UCLA Graduate Admissions "
+author: "Berk Calik"
+date: "1/12/2020"
+output: html_document
+theme: united 
+highlight: tango
+df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r eval=FALSE, include=FALSE}
+install.package("MASS")
+```
+
+```{r eval=FALSE, include=FALSE}
+install.packages("ggplot2")
+```
+
+```{r eval=FALSE, include=FALSE}
+install.packages("grid")
+```
+```{r eval=FALSE, include=FALSE}
+install.packages("gridExtra")
+```
+
+  
+```{r include = FALSE}
+library(ISLR)
+library(tidyverse)
+library(class)
+library(rpart)
+library(rpart.plot)
+library(pROC)
+library(MASS)
+library(grid)
+library(ggplot2)
+library(gridExtra)
+```
+In this practical, as the aim of creating prediction models through predictors, I've found a dataset created by UCLA Graduate Admission. This dataset was built for the purpose of helping students in shortlisting universities with their profiles. The dataset contains several parameters during the application for graduate programs. The parameters include:
+
+1. GRE Scores (out of 340)
+2. TOEFL Scores (out of 120)
+3. University Rating (out of 5)
+4. State of Purpose Strength(out of 5)
+5. Letter of Recommendation Strength (out of 5)
+6. Research Experience (Either 0 or 1)
+7. Chance of Admit (Ranging from 0 to 1)
+
+Since the outcome probability was provided by dataset as "Chance of Admit",to predict whether the student can get accepted or not, I've created another parameter as "Accepted" that the students who have more than 75% chance of admission, it will be assumed as accepted (1), and the students who have less than 75% chance of admission, will be assumed as not accepted(0). 
+
+In the assignment, there will be three different prediction/classification models created with the k-nearest neighbors algorithm, logistic regression, and linear discriminant analysis. The prediction outcomes will be compared by confusion matrixes to find out which model would be most accurate for our prediction. Since we have 400 observations, I’ve decided to split the dataset into a training set by 80% and test set 20%. After executing the models, through the confusion matrix analysis, even though I’ve found that their accuracy results are slightly close to each other,Linear Discriminant Analysis has slightly better prediction results with 90% accuracy where KNN has 81% and LR has 85% accuracy rate.
+
+
+## Prediction Model for Graduate Admission:{.tabset .tabset-fade .tabset-pills}
+
+### Statistical Summary & Decision Tree
+
+```{r, read the dataset, include=FALSE}
+admission <- read_csv("Admission_Predict.csv")
+```
+
+
+```{r, Change the column names, echo = FALSE}
+colnames(admission)[colnames(admission)=="Serial No."] <- "serial_no"
+colnames(admission)[colnames(admission)=="Chance of Admit"] <- "chance_of_admit"
+colnames(admission)[colnames(admission)=="University Rating"] <- "uni_rating"
+colnames(admission)[colnames(admission)=="GRE Score"] <- "GRE"
+colnames(admission)[colnames(admission)=="TOEFL Score"] <- "TOEFL"
+
+
+summary(admission)
+```
+
+In the decision tree, we can see that CGPA stands a crucial role with the optimal lowest sum of squared residuals (SSR) among other predictors, that’s why the root node starts with CGPA. Each leaf (or terminal) is set by 10 that the minimum number of observations in each leaf will be minimum 10. For instance, we can interpret from the decision tree that a student who has a higher GPA than 8.7, a higher GRE score than 320, and a higher SOP Strength score than 3.8 would have 100% to get accepted.
+
+```{r, setting the random number generator, echo = FALSE}
+set.seed(45)
+```
+
+
+```{r, Splitting dataset into train and test,echo = FALSE}
+admission_df <- admission %>% 
+  mutate(Accepted = ifelse(chance_of_admit> 0.75,1,0)) %>% 
+  mutate(split = sample(rep(c("train", "test"), times = c(300,100),))) %>%
+  dplyr::select(-chance_of_admit) %>% 
+  dplyr::select(-serial_no)
+
+admission_train <- admission_df %>% 
+  filter(split == "train") %>% 
+  dplyr::select(-split) 
+   
+  
+admission_test <- admission_df %>% 
+  filter(split == "test") %>% 
+  dplyr::select(-split)
+
+
+```
+
+```{r, decision tree for admission, echo=FALSE}
+admission_tree_mod <- rpart(Accepted ~ ., data = admission_df,control = rpart.control(minbucket = 10, cp = 0))
+rpart.plot(admission_tree_mod)
+```
+
+
+In the graph below, since we have more than 2 predictors, it’s hard to visualize based on all of them; therefore, to understand our data through a graph, I’ve decided to visualize with GRE and TOEFL parameters which have a continuous range so it will give us more observable results.
+
+
+```{r, Visualize GRE/TOEFL plot, echo = FALSE}
+admission_df %>% 
+  arrange(Accepted) %>%
+  ggplot(aes(x = TOEFL, y = GRE, colour = as.factor(Accepted)))+
+  geom_point(size = 1.3) +
+  theme_minimal() +
+  scale_colour_viridis_d() 
+
+```
+
+### K-Nearest Neighbours Model
+**Prediction Model with 5 K-Nearest Neighbours**
+
+Through applying KNN classification method, I've decided to use 5 optimal k points that classify the groups of students on a majority vote of the 5 points closest to them. You can see from the graphs that KNN model has done well with the outcomes on the test set which includes 100 observations. 
+
+```{r, creating the 5knn model with train and test set, echo = FALSE}
+knn_5_pred <- knn(
+  train = admission_train %>% dplyr::select(-Accepted),
+  test  = admission_test  %>% dplyr::select(-Accepted),
+  cl    = as_factor(admission_train$Accepted),
+  k     = 5
+)
+
+```
+
+
+```{r, plotting the knn model, echo = FALSE}
+p1 <- bind_cols(admission_test, pred = knn_5_pred) %>% 
+  arrange(Accepted) %>% 
+  ggplot(aes(x = TOEFL, y = GRE, colour = pred)) +
+  geom_point(size = 1.3) + 
+  scale_colour_viridis_d() +
+  theme_minimal() +
+  labs(colour=NULL) +
+  labs(title = "Predicted Class (5nn)") 
+
+p2 <- bind_cols(admission_test, pred = knn_5_pred) %>% 
+  arrange(Accepted) %>% 
+  ggplot(aes(x = TOEFL, y = GRE, colour = as.factor(Accepted))) +
+  geom_point(size = 1.3) + 
+  scale_colour_viridis_d() +
+  theme_minimal() +
+  labs(colour=NULL) +
+  labs(title = "True Class") 
+
+grid.arrange(p1, p2)
+```
+
+As we can interpret from the graphs above that KNN model predicts well with 83% accuracy on test data with 100 observations. 
+
+To observe in a more elaborative way, we need to explore data predictions through interpreting our confusion matrix with accuracy, True Positive Rate, True Negative Rate, False Positive Rate, Positive Predictive Value and Negative Predictive Value. 
+
+You can find the confusion matrix and it's analysis for KNN Model below: 
+```{r, confusion matrix for 5knn,echo=FALSE}
+cmat_knn <- table(true = admission_test$Accepted, predicted = knn_5_pred)
+
+TN <- cmat_knn[1,1]
+FN <- cmat_knn[2,1]
+FP <- cmat_knn[1,2]
+TP <- cmat_knn[2,2]
+
+cmat_knn
+```
+
+
+```{r confusion matrix for 5knn analysis,echo=FALSE}
+knn_table <- tibble(
+  Accuracy = (TP+TN) / sum(cmat_knn),
+  TPR = TP / (TP +FN),
+  TNR = TN / (TN + FP),
+  FPR = FP / (TN + FP),
+  PPV = TP / (TP + FP),
+  NPV = TN / (TN + FN)
+)
+
+knn_table
+
+```
+
+[Accuracy] The KNN classification classified correctly 81 student out 100, meaning that 19 students are misclassified. 
+
+[TPR] If a student gets accepted to UCLA, there is a 74% possibility that the model detects this.
+
+[TNR] If a student gets rejection from UCLA, there is a 87% possibility that the model detects this. 
+
+[FPR] If a student gets rejection from UCLA, there is a 13% chance that he or she will be predict to get accepted.
+
+[PPV] If the student is predicted to get accepted to UCLA, there is 83% chance they will actually get accepted. 
+
+[NPV] If the student is predicted to get rejection from UCLA, there is 79% chance that they will indeed get rejection. 
+
+### Logistic Regression Model
+**Prediction Model with Logistic Regression**
+
+```{r, creating the lr model, echo = FALSE}
+#Training the model
+lr_mod <- glm(Accepted ~., family = binomial, data =  admission_train)
+
+#Predicting the training set
+lr_predict <- predict(lr_mod, type = "response" )
+
+#Predicting the test set
+lr_test_predict <- predict(lr_mod, newdata = admission_test, type = "response")
+
+#Setting up  a threshold with the probability outcomes.75 
+lr_test_result <- ifelse(lr_test_predict > 0.75,1,0)
+```
+
+From the predicted probability graph of logistic regression model, we cannot interpret from the plot that there isn't higher or lower avarage predicted probability for the accepted and rejected students.But there are still data points in the accepted and rejected categories with high probability for being accepted to UCLA. 
+
+```{r, plotting predicting probability and test prediction of lr model, echo = FALSE}
+tibble(observed  = as.factor(admission_train$Accepted), 
+       predicted = lr_predict) %>% 
+  ggplot(aes(y = predicted, x = observed, colour = observed)) +
+  geom_point(position = position_jitter(width = 0.2), alpha = .3) +
+  scale_colour_manual(values = c("red", "orange"), guide = "none") +
+  theme_minimal() +
+  labs(y = "Predicted probability to be accepted")
+```
+
+Shown in the GRE/TOEFL plots of true and predicted classes that we can construe logistic regression's prediction outcome created similar accuracy on the graphs as well as KNN model and Linear Discriminant Analysis Model.To conclude this idea in precise way, we need to analyze the confusion matrix of this model. Based on model prediction and confusion matrix:
+
+```{r, plotting test prediction of lr model, echo = FALSE}
+p3 <- bind_cols(admission_test, pred = lr_test_result) %>% 
+  arrange(Accepted) %>% 
+  ggplot(aes(x = TOEFL, y = GRE, colour = as.factor(Accepted))) +
+  geom_point(size = 1.3) + 
+  theme_minimal() +
+  scale_colour_viridis_d() +
+  labs(colour=NULL) +
+  labs(title = "True Class")
+
+p4 <- bind_cols(admission_test, pred = as.factor(lr_test_result)) %>% 
+  arrange(pred) %>% 
+  ggplot(aes(x = TOEFL, y = GRE, colour = pred)) +
+  geom_point(size = 1.3) + 
+  theme_minimal() +
+  scale_colour_viridis_d() +
+  labs(colour=NULL) +
+  labs(title = "Predicted Class LR")
+
+grid.arrange(p3, p4)
+```
+
+
+
+```{r, creating a confusion matrix for logistic regression, echo = FALSE}
+cmat_lr <-table(true = admission_test$Accepted, predicted = lr_test_result)
+
+cmat_lr
+
+TN <- cmat_lr[1,1]
+FN <- cmat_lr[2,1]
+FP <- cmat_lr[1,2]
+TP <- cmat_lr[2,2]
+```
+
+
+```{r creating a confusion matrix analysis for logistic regression, echo=FALSE}
+tibble(
+  Accuracy = (TP+TN) / sum(cmat_lr),
+  TPR = TP / (TP +FN),
+  TNR = TN / (TN + FP),
+  FPR = FP / (TN + FP),
+  PPV = TP / (TP + FP),
+  NPV = TN / (TN + FN))
+
+```
+
+[Accuracy] The Logistic Regression classification classified correctly 85 students out 100, meaning that 15 students are misclassified. 
+
+[TPR] If a student gets accepted to UCLA, there is a 74% possibility that the model detects this.
+
+[TNR] If a student gets rejection from UCLA, there is a 94% possibility that the model detects this. 
+
+[FPR] If a student gets rejection from UCLA, there is a 6% chance that he or she will be predict to get accepted.
+
+[PPV] If the student is predicted to get accepted to UCLA, there is 92% chance they will actually get accepted. 
+
+[NPV] If the student is predicted to get rejection from UCLA, there is 81% chance that they will indeed get rejection. 
+
+From these evaluations, we can interpret that for this dataset, logistic regression is not useful to predict the outcomes. 
+
+
+
+Also, to understand ROC plot and AUC for Logistic Regression:
+
+For the linear logistic regression model, we found out that ROC plot's area under the curve(AUC) is 0.9663, which can be interpreted as a model with well prediction that is shown as: 
+
+```{r, ROC Curve and AUC results for LR, echo = FALSE}
+roc_lr <- roc(admission_test$Accepted, lr_test_predict )
+
+ggroc(roc_lr) + theme_minimal() + labs(title = "Logistic Regression Roc Model")
+
+```
+
+### Linear Discriminant Analysis Model
+**Prediction Model with Linear Discriminant Analysis**
+
+When we interpret our LDA model,we can interpret that prior probabilities of accepted and have slightly higher cGPA, with a research project and higher GRE and TOEFL score as well as stronger SOP and LOR. We also analyze the prior probability since it can be assessed before making reference to certain relevant observation. Especially on the assumption that all possible outcome might be given the same probability. 
+
+```{r, creating a LDA model for admission, echo = FALSE}
+lda_mod <- lda(as.factor(Accepted) ~ ., data = admission_train)
+
+lda_mod
+```
+
+As we can see from the graph that our LDA model is doing well job when it comes to predict the accepted students. However to be more precise we need to check confusion matrix and analyze it: 
+
+```{r, predicting lda model, echo = FALSE  }
+pred_lda <- predict(lda_mod, newdata = admission_test)
+
+
+p5 <- bind_cols(admission_test, pred = pred_lda$class) %>% 
+  arrange(Accepted) %>% 
+  ggplot(aes(x = TOEFL, y = GRE, colour = as.factor(Accepted))) +
+  geom_point(size = 1.3) + 
+  scale_colour_viridis_d() +
+  theme_minimal() +
+  labs(colour=NULL) +
+  labs(title = "True Class")
+
+p6 <- bind_cols(admission_test, pred = pred_lda$class) %>% 
+  arrange(pred) %>% 
+  ggplot(aes(x = GRE, y = TOEFL, colour = pred)) +
+  geom_point(size = 1.3) + 
+  scale_colour_viridis_d() +
+  theme_minimal() +
+  labs(colour=NULL) +
+  labs(title = "Predicted Class")
+
+grid.arrange(p5,p6)
+
+```
+
+
+```{r, analysis of lda confusion matrix, echo=FALSE}
+cmat_lda <- table(true = admission_test$Accepted, predicted = pred_lda$class)
+
+cmat_lda 
+
+TN <- cmat_lda[1,1]
+FN <- cmat_lda[2,1]
+FP <- cmat_lda[1,2]
+TP <- cmat_lda[2,2]
+```
+
+
+```{r analysis of lda confusion matrix analysis, echo=FALSE}
+lda_table <- tibble(
+  Accuracy = (TP+TN) / sum(cmat_lda),
+  TPR = TP / (TP +FN),
+  TNR = TN / (TN + FP),
+  FPR = FP / (TN + FP),
+  PPV = TP / (TP + FP),
+  NPV = TN / (TN + FN)
+)
+
+lda_table
+```
+
+[Accuracy] The LDA classification classified correctly 89 students out of 100, meaning that 11 students are misclassified. 
+
+[TPR] If a student gets accepted to UCLA, there is a 85% possibility that the model detects this.
+
+[TNR] If a student gets rejection from UCLA, there is a 92% possibility that the model detects this. 
+
+[FPR] If a student gets rejection from UCLA, there is a 8% chance that he or she will be predict to get accepted.
+
+[PPV] If the student is predicted to get accepted to UCLA, there is a 91% chance they will actually get accepted. 
+
+[NPV] If the student is predicted to get rejection from UCLA, there is a 86% chance that they will indeed get rejection. 
+
+
+
+
